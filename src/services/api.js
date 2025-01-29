@@ -1,21 +1,77 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8080'; 
+const API_BASE_URL = 'http://localhost:8080';
 
 export const apiClient = axios.create({
     baseURL: API_BASE_URL,
 });
 
+const responseTypes = {
+    AUTH: {
+        accessToken: '',
+        refreshToken: '',
+        expiresIn: {
+            access: 900,
+            refresh: 2592000
+        }
+    }
+};
+
 apiClient.interceptors.response.use(
     response => response,
     error => {
-        console.error('API Error:', error.response);
-        return Promise.reject(error);
+        const errorResponse = {
+            message: error.response?.data?.message || 'An unknown error occurred',
+            status: error.response?.status,
+            code: error.response?.data?.code,
+        };
+
+        console.error('API Error:', errorResponse);
+        return Promise.reject(errorResponse);
     }
 );
 
-export const login = (credentials) => apiClient.post('/auth/login', credentials);
-export const register = (data) => apiClient.post('/auth', data);
+apiClient.interceptors.request.use(
+    async (config) => {
+        if (config.url.includes('/auth/refresh')) {
+            const refreshToken = config.refreshToken;
+            config.headers.Authorization = `Bearer ${refreshToken}`;
+            delete config.refreshToken;
+        }
+        return config;
+    },
+    error => Promise.reject(error)
+);
+
+export const login = (credentials) =>
+    apiClient.post('/auth/login', credentials)
+        .then(response => ({
+            ...response,
+            data: {
+                ...responseTypes.AUTH,
+                ...response.data,
+                username: credentials.username
+            }
+        }));
+
+export const register = (data) =>
+    apiClient.post('/auth', data)
+        .then(response => ({
+            ...response,
+            data: {
+                ...responseTypes.AUTH,
+                ...response.data,
+                username: data.username
+            }
+        }));
+
+export const refreshTokens = (refreshToken) =>
+    apiClient({
+        method: 'post',
+        url: '/auth/refresh',
+        refreshToken: refreshToken
+    });
+
 export const getKey = () => apiClient.get('/auth');
 
 export const fetchNotes = () => apiClient.get('/app/notes');

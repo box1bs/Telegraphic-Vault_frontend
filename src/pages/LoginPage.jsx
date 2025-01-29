@@ -79,7 +79,7 @@ const LoginPage = () => {
             </form>
 
             <p style={styles.linkText}>
-              Don't have an account?{' '}
+              Don&#39;t have an account?{' '}
               <a href="/register" style={styles.link}>
                 Register here
               </a>

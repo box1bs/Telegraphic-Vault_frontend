@@ -1,0 +1,7 @@
+services:
+  redis:
+    image: redis:latest
+    container_name: "local_storage"
+    restart: always
+    ports:
+      - "3070:6379"

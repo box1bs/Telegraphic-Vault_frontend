@@ -1,178 +1,174 @@
 import { createContext, useState, useContext, useEffect } from 'react';
-import { login, register, getKey, apiClient } from '../services/api';
+import {login, register, getKey, apiClient, refreshTokens} from '../services/api';
+import { tokenStorage } from '../localStorage/tokenStorage';
 import CryptoJS from 'crypto-js';
 
 const AuthContext = createContext();
 
 const encryptPassword = (password, base64Key) => {
-  const key = CryptoJS.enc.Base64.parse(base64Key);
-  const iv = CryptoJS.lib.WordArray.random(16);
+    const key = CryptoJS.enc.Base64.parse(base64Key);
+    const iv = CryptoJS.lib.WordArray.random(16);
 
-  const encrypted = CryptoJS.AES.encrypt(password, key, {
-    iv: iv,
-    mode: CryptoJS.mode.CBC,
-    padding: CryptoJS.pad.Pkcs7
-  });
+    const encrypted = CryptoJS.AES.encrypt(password, key, {
+        iv: iv,
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7
+    });
 
-  const ivAndEncrypted = CryptoJS.lib.WordArray.create()
-      .concat(iv)
-      .concat(encrypted.ciphertext);
+    const ivAndEncrypted = CryptoJS.lib.WordArray.create()
+        .concat(iv)
+        .concat(encrypted.ciphertext);
 
-  return CryptoJS.enc.Base64.stringify(ivAndEncrypted);
+    return CryptoJS.enc.Base64.stringify(ivAndEncrypted);
 };
 
 // eslint-disable-next-line react/prop-types
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [encryptionKey, setEncryptionKey] = useState(null);
-  const [tokens, setTokens] = useState(() => {
-    const savedTokens = localStorage.getItem('tokens');
-    return savedTokens ? JSON.parse(savedTokens) : null;
-  });
+    const [user, setUser] = useState(null);
+    const [, setEncryptionKey] = useState(null);
 
-  // Set up axios interceptor for token handling
-  useEffect(() => {
-    const requestInterceptor = apiClient.interceptors.request.use(
-        (config) => {
-          if (tokens?.accessToken) {
-            config.headers.Authorization = `Bearer ${tokens.accessToken}`;
-          }
-          return config;
-        },
-        (error) => Promise.reject(error)
-    );
+    // Настройка перехватчика axios для обработки токенов
+    useEffect(() => {
+        if (!user?.username) return;
 
-    const responseInterceptor = apiClient.interceptors.response.use(
-        (response) => response,
-        async (error) => {
-          const originalRequest = error.config;
+        const requestInterceptor = apiClient.interceptors.request.use(
+            (config) => {
+                const accessToken = tokenStorage.getToken(user.username, 'access_token');
+                if (accessToken) {
+                    config.headers.Authorization = `Bearer ${accessToken}`;
+                }
+                return config;
+            },
+            (error) => Promise.reject(error)
+        );
 
-          // If error is 401 and we haven't tried to refresh token yet
-          if (error.response?.status === 401 && !originalRequest._retry && tokens?.refreshToken) {
-            originalRequest._retry = true;
+        const responseInterceptor = apiClient.interceptors.response.use(
+            (response) => response,
+            async (error) => {
+                const originalRequest = error.config;
 
-            try {
-              // Request new access token using refresh token
-              const response = await apiClient.post('/auth/refresh', {
-                refreshToken: tokens.refreshToken
-              });
+                if (error.response?.status === 401 && !originalRequest._retry && user?.username) {
+                    originalRequest._retry = true;
 
-              const newTokens = {
-                accessToken: response.data.accessToken,
-                refreshToken: response.data.refreshToken
-              };
+                    try {
+                        const refreshToken = tokenStorage.getToken(user.username, 'refresh_token');
+                        if (!refreshToken) {
+                            throw new Error('No refresh token available');
+                        }
 
-              // Update tokens in state and localStorage
-              setTokens(newTokens);
-              localStorage.setItem('tokens', JSON.stringify(newTokens));
+                        const response = await refreshTokens(refreshToken);
+                        const { accessToken, refreshToken: newRefreshToken, expiresIn } = response.data;
 
-              // Retry original request with new token
-              originalRequest.headers.Authorization = `Bearer ${newTokens.accessToken}`;
-              return apiClient(originalRequest);
-            } catch (refreshError) {
-              // If refresh token is invalid, log out user
-              logoutUser();
-              return Promise.reject(refreshError);
+                        tokenStorage.setToken(user.username, 'access_token', accessToken, expiresIn.access);
+                        if (newRefreshToken) {
+                            tokenStorage.setToken(user.username, 'refresh_token', newRefreshToken, expiresIn.refresh);
+                        }
+
+                        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+                        return apiClient(originalRequest);
+                    } catch (refreshError) {
+                        logoutUser();
+                        return Promise.reject(refreshError);
+                    }
+                }
+                return Promise.reject(error);
             }
-          }
+        );
 
-          return Promise.reject(error);
+        return () => {
+            apiClient.interceptors.request.eject(requestInterceptor);
+            apiClient.interceptors.response.eject(responseInterceptor);
+        };
+    }, [user?.username]);
+
+    const getEncryptionKey = async () => {
+        try {
+            const response = await getKey();
+            const key = response.data.key;
+            setEncryptionKey(key);
+            return key;
+        } catch (error) {
+            console.error('Failed to get key:', error);
+            throw error;
         }
-    );
-
-    return () => {
-      apiClient.interceptors.request.eject(requestInterceptor);
-      apiClient.interceptors.response.eject(responseInterceptor);
     };
-  }, [tokens]);
 
-  const getEncryptionKey = async () => {
-    try {
-      const response = await getKey();
-      const key = response.data.key;
-      setEncryptionKey(key);
-      return key;
-    } catch (error) {
-      console.error('Failed to get key:', error);
-      throw error;
-    }
-  };
+    const registerUser = async (credentials) => {
+        try {
+            const key = await getEncryptionKey();
+            const encryptedPassword = encryptPassword(credentials.password, key);
 
-  const registerUser = async (credentials) => {
-    try {
-      const key = await getEncryptionKey();
-      const encryptedPassword = encryptPassword(credentials.password, key);
+            const response = await register({
+                username: credentials.username,
+                password: encryptedPassword,
+                key: key
+            });
 
-      const response = await register({
-        username: credentials.username,
-        password: encryptedPassword,
-        key: key
-      });
+            const { username, accessToken, refreshToken, expiresIn } = response.data;
 
-      const { user: userData, accessToken, refreshToken } = response.data;
+            tokenStorage.setToken(username, 'access_token', accessToken, expiresIn.access);
+            tokenStorage.setToken(username, 'refresh_token', refreshToken, expiresIn.refresh);
 
-      setUser(userData);
-      setTokens({ accessToken, refreshToken });
-      localStorage.setItem('tokens', JSON.stringify({ accessToken, refreshToken }));
+            setUser(username);
+            return response.data;
+        } catch (error) {
+            console.error('Registration error:', error);
+            throw new Error(error.response?.data?.message || 'Registration failed');
+        }
+    };
 
-      return response.data;
-    } catch (error) {
-      console.error('Registration error:', error);
-      throw new Error(error.response?.data?.message || 'Registration failed');
-    }
-  };
+    const loginUser = async (credentials) => {
+        try {
+            const key = await getEncryptionKey();
+            const encryptedPassword = encryptPassword(credentials.password, key);
 
-  const loginUser = async (credentials) => {
-    try {
-      const key = await getEncryptionKey();
-      const encryptedPassword = encryptPassword(credentials.password, key);
+            const response = await login({
+                username: credentials.username,
+                password: encryptedPassword,
+                key: key
+            });
 
-      const response = await login({
-        username: credentials.username,
-        password: encryptedPassword,
-        key: key
-      });
+            const { username, accessToken, refreshToken, expiresIn } = response.data;
 
-      const { user: userData, accessToken, refreshToken } = response.data;
+            // Сохраняем только username и токены
+            tokenStorage.setToken(username, 'access_token', accessToken, expiresIn.access);
+            tokenStorage.setToken(username, 'refresh_token', refreshToken, expiresIn.refresh);
 
-      setUser(userData);
-      setTokens({ accessToken, refreshToken });
-      localStorage.setItem('tokens', JSON.stringify({ accessToken, refreshToken }));
+            setUser(username); // сохраняем только username
+            return response.data;
+        } catch (error) {
+            console.error('Login error:', error);
+            throw error;
+        }
+    };
 
-      return response.data;
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
-    }
-  };
+    const logoutUser = () => {
+        if (user?.username) {
+            tokenStorage.clearUserTokens(user.username);
+        }
+        setUser(null);
+    };
 
-  const logoutUser = () => {
-    setUser(null);
-    setTokens(null);
-    localStorage.removeItem('tokens');
-  };
+    const value = {
+        user,
+        registerUser,
+        loginUser,
+        logoutUser,
+        getEncryptionKey,
+        isAuthenticated: !!user
+    };
 
-  const value = {
-    user,
-    tokens,
-    registerUser,
-    loginUser,
-    logoutUser,
-    getEncryptionKey,
-    isAuthenticated: !!user
-  };
-
-  return (
-      <AuthContext.Provider value={value}>
-        {children}
-      </AuthContext.Provider>
-  );
+    return (
+        <AuthContext.Provider value={value}>
+            {children}
+        </AuthContext.Provider>
+    );
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+    const context = useContext(AuthContext);
+    if (!context) {
+        throw new Error('useAuth must be used within an AuthProvider');
+    }
+    return context;
 };
