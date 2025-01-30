@@ -45,14 +45,17 @@ apiClient.interceptors.request.use(
 
 export const login = (credentials) =>
     apiClient.post('/auth/login', credentials)
-        .then(response => ({
-            ...response,
-            data: {
-                ...responseTypes.AUTH,
-                ...response.data,
-                username: credentials.username
-            }
-        }));
+        .then(response => {
+            console.log('Raw server response:', response.data);  // Let's see what the server actually sends
+            return {
+                ...response,
+                data: {
+                    ...responseTypes.AUTH,  // This provides default values
+                    ...response.data,       // This should override with actual server data
+                    username: credentials.username
+                }
+            };
+        });
 
 export const register = (data) =>
     apiClient.post('/auth', data)

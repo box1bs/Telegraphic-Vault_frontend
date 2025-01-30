@@ -109,7 +109,7 @@ export const AuthProvider = ({ children }) => {
             tokenStorage.setToken(username, 'access_token', accessToken, expiresIn.access);
             tokenStorage.setToken(username, 'refresh_token', refreshToken, expiresIn.refresh);
 
-            setUser(username);
+            setUser({username: username});
             return response.data;
         } catch (error) {
             console.error('Registration error:', error);
@@ -128,13 +128,28 @@ export const AuthProvider = ({ children }) => {
                 key: key
             });
 
-            const { username, accessToken, refreshToken, expiresIn } = response.data;
+            const { access_token, refresh_token, expiresIn } = response.data;
+            const username = credentials.username;
 
-            // Сохраняем только username и токены
-            tokenStorage.setToken(username, 'access_token', accessToken, expiresIn.access);
-            tokenStorage.setToken(username, 'refresh_token', refreshToken, expiresIn.refresh);
+            if (!access_token || !refresh_token) {
+                console.error('Missing tokens in server response');
+                throw new Error('Invalid server response - missing authentication tokens');
+            }
 
-            setUser(username); // сохраняем только username
+            // Store tokens
+            tokenStorage.setToken(username, 'access_token', access_token, expiresIn.access);
+            tokenStorage.setToken(username, 'refresh_token', refresh_token, expiresIn.refresh);
+
+            // Verify storage
+            const storedAccessToken = tokenStorage.getToken(username, 'access_token');
+            console.log('Token storage verification:', {
+                accessTokenStored: !!storedAccessToken,
+                username
+            });
+
+            // Update user state
+            setUser({username: username});
+
             return response.data;
         } catch (error) {
             console.error('Login error:', error);

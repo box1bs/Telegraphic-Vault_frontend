@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import {apiClient} from "../services/api.js";
+import { apiClient } from "../services/api.js";
+import { useAuth } from '../context/AuthContext';
 
 // eslint-disable-next-line react/prop-types
 const CreateDialog = ({ isOpen, onClose, onSuccess }) => {
+    const {isAuthenticated } = useAuth();
     const [contentType, setContentType] = useState(null);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
     const [url, setUrl] = useState('');
     const [tags, setTags] = useState('');
+    const [error, setError] = useState(null);
 
     const handleClose = () => {
         setContentType(null);
@@ -16,22 +19,33 @@ const CreateDialog = ({ isOpen, onClose, onSuccess }) => {
         setContent('');
         setUrl('');
         setTags('');
+        setError(null);
         onClose();
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!isAuthenticated) {
+            setError('You must be logged in to create content');
+            return;
+        }
+
         try {
-            await apiClient.post(`/app/${contentType}s`, {
+            const response = await apiClient.post(`/app/${contentType}s`, {
                 title,
-                [contentType === 'note' ? 'content' : 'url']: content,
-                tags: tags.split(',')
+                [contentType === 'note' ? 'content' : 'url']: contentType === 'note' ? content : url,
+                description: contentType === 'bookmark' ? content : undefined,
+                tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
             });
-            onSuccess(contentType);
+
+            if (response.status === 201 || response.status === 200) {
+                onSuccess(contentType);
+                handleClose();
+            }
         } catch (error) {
             console.error('Creation failed:', error);
+            setError(error.message || 'Failed to create content');
         }
-        handleClose();
     };
 
     if (!isOpen) return null;
@@ -51,6 +65,13 @@ const CreateDialog = ({ isOpen, onClose, onSuccess }) => {
                         <X size={20} />
                     </button>
                 </div>
+
+                {/* Error message */}
+                {error && (
+                    <div className="p-4 bg-red-500 bg-opacity-20 border border-red-500 text-red-500 mx-4 mt-4 rounded">
+                        {error}
+                    </div>
+                )}
 
                 {/* Main content area */}
                 <div className="p-6">
