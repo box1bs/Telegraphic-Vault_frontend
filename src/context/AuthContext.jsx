@@ -33,9 +33,9 @@ export const AuthProvider = ({ children }) => {
 
         const requestInterceptor = apiClient.interceptors.request.use(
             (config) => {
-                const accessToken = tokenStorage.getToken(user.username, 'access_token');
-                if (accessToken) {
-                    config.headers.Authorization = `Bearer ${accessToken}`;
+                const access_token = tokenStorage.getToken(user.username, 'access_token');
+                if (access_token) {
+                    config.headers.Authorization = `Bearer ${access_token}`;
                 }
                 return config;
             },
@@ -51,20 +51,20 @@ export const AuthProvider = ({ children }) => {
                     originalRequest._retry = true;
 
                     try {
-                        const refreshToken = tokenStorage.getToken(user.username, 'refresh_token');
-                        if (!refreshToken) {
+                        const refresh_token = tokenStorage.getToken(user.username, 'refresh_token');
+                        if (!refresh_token) {
                             throw new Error('No refresh token available');
                         }
 
-                        const response = await refreshTokens(refreshToken);
-                        const { accessToken, refreshToken: newRefreshToken, expiresIn } = response.data;
+                        const response = await refreshTokens(refresh_token);
+                        const { access_token, refresh_token: newRefreshToken, expiresIn } = response.data;
 
-                        tokenStorage.setToken(user.username, 'access_token', accessToken, expiresIn.access);
+                        tokenStorage.setToken(user.username, 'access_token', access_token, expiresIn.access);
                         if (newRefreshToken) {
                             tokenStorage.setToken(user.username, 'refresh_token', newRefreshToken, expiresIn.refresh);
                         }
 
-                        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+                        originalRequest.headers.Authorization = `Bearer ${access_token}`;
                         return apiClient(originalRequest);
                     } catch (refreshError) {
                         logoutUser();
@@ -104,10 +104,11 @@ export const AuthProvider = ({ children }) => {
                 key: key
             });
 
-            const { username, accessToken, refreshToken, expiresIn } = response.data;
+            const { access_token, refresh_token, expiresIn } = response.data;
+            let username = credentials.username;
 
-            tokenStorage.setToken(username, 'access_token', accessToken, expiresIn.access);
-            tokenStorage.setToken(username, 'refresh_token', refreshToken, expiresIn.refresh);
+            tokenStorage.setToken(username, 'access_token', access_token, expiresIn.access);
+            tokenStorage.setToken(username, 'refresh_token', refresh_token, expiresIn.refresh);
 
             setUser({username: username});
             return response.data;
@@ -180,6 +181,7 @@ export const AuthProvider = ({ children }) => {
     );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (!context) {
